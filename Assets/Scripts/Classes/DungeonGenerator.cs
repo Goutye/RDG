@@ -53,24 +53,25 @@ public class DungeonGenerator : MonoBehaviour {
 
 		public OutOfPart(Part p, Direction d)
 		{
+			float dist = 0.5f;
 			this.p = p;
 			dir = d;
 
 			if (d == Direction.NORTH)
 			{
-				pos = new Vector2(p.x, p.y - 0.25f);
+				pos = new Vector2(p.x, p.y + dist);
 			}
 			else if (d == Direction.EAST)
 			{
-				pos = new Vector2(p.x + 0.25f, p.y);
+				pos = new Vector2(p.x + dist, p.y);
 			}
 			else if (d == Direction.SOUTH)
 			{
-				pos = new Vector2(p.x, p.y + 0.25f);
+				pos = new Vector2(p.x, p.y - dist);
 			}
 			else
 			{
-				pos = new Vector2(p.x - 0.25f, p.y);
+				pos = new Vector2(p.x - dist, p.y);
 			}
 		}
 
@@ -158,6 +159,11 @@ public class DungeonGenerator : MonoBehaviour {
 			return dir[(int)d];
 		}
 
+		public Vector2 getPosition()
+		{
+			return new Vector2(x, y);
+		}
+
 		public ArrayList getOuts()
 		{
 			ArrayList list = new ArrayList();
@@ -190,7 +196,7 @@ public class DungeonGenerator : MonoBehaviour {
 
 		public override string ToString()
 		{
-			return"Part{" + type + "," + x + "," + y + "}";
+			return"{" + type + "," + x + "," + y + "}";
 		}
 
 		abstract public Direction getDirection();
@@ -350,8 +356,7 @@ public class DungeonGenerator : MonoBehaviour {
 					++r;
 					if (r > 100)
 					{
-						Debug.Log(x + " " + y);
-						return;
+						parts[i] = getRandomPart();
 					}
 				}
 				while (map[x, y] != null || (map[x, y] == null && !insertNoLinks(parts[i], x, y)));
@@ -359,19 +364,17 @@ public class DungeonGenerator : MonoBehaviour {
 
 			//Link the different part of the subset
 			ArrayList partsList = new ArrayList();
-			ArrayList partsNbOutsList = new ArrayList();
 			ArrayList links = new ArrayList();
 			Part[] partsCopy = new Part[parts.Length];
 			for (int i = 0; i < partsCopy.Length; ++i)
 				partsCopy[i] = parts[i].Clone();
 
-			bool linked;
-			int currentPart = 0;
+			bool linked, searchOnlyPerfect = true;
 			ArrayList otherParts = new ArrayList();
 			ArrayList outList = partsCopy[0].getOuts();
+			ArrayList outListNotPerfect = new ArrayList();
 
 			partsList.Add(partsCopy[0]);
-			partsNbOutsList.Add(outList.Count);
 			while (outList.Count > 0)
 			{
 				int id = UnityEngine.Random.Range(0, outList.Count);
@@ -388,7 +391,12 @@ public class DungeonGenerator : MonoBehaviour {
 						Debug.Log("No other parts found");
 						break;
 					}
-					OutOfPart bestOut = SearchCloserOut(otherParts, currentOut);
+					OutOfPart bestOut = SearchCloserOut(otherParts, currentOut, searchOnlyPerfect);
+					if (bestOut == null)
+					{
+						outListNotPerfect.Add(currentOut);
+						break;
+					}
 					bestOut.p.close(bestOut.dir);
 
 					if (!partsList.Contains(bestOut.p))
@@ -396,13 +404,9 @@ public class DungeonGenerator : MonoBehaviour {
 						ArrayList outsOfBestPart = bestOut.p.getOuts();
 						outList.AddRange(outsOfBestPart);
 
-						if (outList.Count > 0 || currentPart == partsCopy.Length - 1)
-						{
-							partsNbOutsList.Add(outsOfBestPart.Count);
-							partsList.Add(bestOut.p);
-						}
-
-						Debug.Log("Add part " + bestOut.p.ToString() + " with " + outsOfBestPart.Count + " outs.");
+						partsList.Add(bestOut.p);
+                        Debug.Log("Add part " + bestOut.p.ToString() + " with " + outsOfBestPart.Count + " outs. " + searchOnlyPerfect);
+						searchOnlyPerfect = true;
 					}
 
 					int minOk = 0;
@@ -411,7 +415,7 @@ public class DungeonGenerator : MonoBehaviour {
 						minOk = 1;
 					}
 
-					if (outList.Count > minOk || currentPart == partsCopy.Length - 1)
+					if (outList.Count > minOk || partsList.Count == partsCopy.Length)
 					{
 						links.Add(new LinkOfParts(currentOut, bestOut));
 						outList.Remove(bestOut);
@@ -426,16 +430,20 @@ public class DungeonGenerator : MonoBehaviour {
 					}
 				}
 
-				partsNbOutsList[currentPart] = ((int)partsNbOutsList[currentPart]) - 1;
-				if (((int)partsNbOutsList[currentPart]) == 0)
+				if (outList.Count == 0)
 				{
-					++currentPart;
-				}
-
-				if (otherParts.Count == 0 && currentPart == partsCopy.Length)
-				{
-					Debug.Log("Every parts linked.");
-					break;
+					if (partsList.Count != partsCopy.Length && outListNotPerfect.Count != 0)
+					{
+						outList.AddRange(outListNotPerfect);
+						outListNotPerfect.RemoveRange(0, outListNotPerfect.Count);
+						searchOnlyPerfect = false;
+						Debug.Log("Make unperfect links from now with " + outList.Count + " outs");
+					}
+					else
+					{
+						Debug.Log("Every parts linked.");
+						break;
+					}
 				}
 			}
 		}
@@ -455,12 +463,43 @@ public class DungeonGenerator : MonoBehaviour {
 			return others;
 		}
 
-		public OutOfPart SearchCloserOut(ArrayList parts, OutOfPart o)
+		public OutOfPart SearchCloserOut(ArrayList parts, OutOfPart o, bool onlyPerfect = false)
 		{
+			ArrayList bestParts = new ArrayList();
+
+			if (onlyPerfect)
+			{
+				Vector2 dirCurrent = o.getPosition() - o.p.getPosition();
+				Vector2 dir;
+				
+
+				foreach (Part p in parts)
+				{
+					//ArrayList outsOfP necessary? overcost?
+					dir = p.getPosition() - o.getPosition();
+
+					if (Vector2.Dot(dirCurrent, dir) > 0)
+					{
+						bestParts.Add(p);
+						//Debug.Log("Best for " + o + " is " + p);
+					}
+				}
+
+				if (bestParts.Count == 0)
+				{
+					Debug.Log("No perfect bestPart found");
+					return null;
+				}
+			}
+			else
+			{
+				bestParts = parts;
+			}
+
 			float bestDist = float.MaxValue;
 			OutOfPart bestOut = null;
 
-			foreach (Part p in parts)
+			foreach (Part p in bestParts)
 			{
 				ArrayList outsOfP = p.getOuts();
 				foreach (OutOfPart outP in outsOfP)
@@ -523,13 +562,11 @@ public class DungeonGenerator : MonoBehaviour {
 			if ((x > 0 && map[x - 1, y] != null)
 				|| (x - 1 < 0 && p.isOpen(Direction.WEST)))
 			{
-				Debug.Log("hello");
 				return false;
 			}
 			if ((y > 0 && map[x, y - 1] != null)
 				|| (y - 1 < 0 && p.isOpen(Direction.SOUTH)))
 			{
-				Debug.Log("hella");
 				return false;
 			}
 			if ((x < width - 1 && map[x + 1, y] != null)
@@ -591,27 +628,27 @@ public class DungeonGenerator : MonoBehaviour {
 			{
 				Instantiate(dg.oneWayGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-                            Quaternion.Euler(0, (int)p.getDirection() * 90, 0));
+                            Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
 			} else if (p.type == PartType.TWOWAY)
 			{
 				Instantiate(dg.twoWayGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-							Quaternion.Euler(0, (int)p.getDirection() * 90, 0));
+							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
 			} else if (p.type == PartType.THREEWAY)
 			{
 				Instantiate(dg.threeWayGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-							Quaternion.Euler(0, (int)p.getDirection() * 90, 0));
+							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
 			} else if (p.type == PartType.TWOWAYCURVE)
 			{
 				Instantiate(dg.twoWayCurveGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-							Quaternion.Euler(0, (int)p.getDirection() * 90, 0));
+							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
 			} else
 			{
 				Instantiate(dg.fourWayGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-							Quaternion.Euler(0, (int)p.getDirection() * 90, 0));
+							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
 			}
 		}
 
