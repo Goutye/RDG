@@ -356,7 +356,7 @@ public class DungeonGenerator : MonoBehaviour {
 		public int width { get; set; }
 		public int height { get; set; }
 
-		public DungeonMap(int width, int height, DungeonGenerator dg)
+		public DungeonMap(int width, int height, float russianRoulette, DungeonGenerator dg)
 		{
 			this.dg = dg;
 			this.height = height;
@@ -470,6 +470,7 @@ public class DungeonGenerator : MonoBehaviour {
 			}
 
 			makeLinks(links);
+			generateDeadEnds(russianRoulette);
 		}
 
 		public ArrayList getOtherParts(Part[] partsCopy, Part p)
@@ -716,10 +717,10 @@ public class DungeonGenerator : MonoBehaviour {
 			}
 
 			ArrayList offset = new ArrayList();
-			offset.Add(new int[3] { 0, 1, (int)Direction.NORTH });
-			offset.Add(new int[3] { 0, -1, (int)Direction.SOUTH });
 			offset.Add(new int[3] { 1, 0, (int)Direction.EAST });
+			offset.Add(new int[3] { 0, 1, (int)Direction.NORTH });
 			offset.Add(new int[3] { -1, 0, (int)Direction.WEST });
+			offset.Add(new int[3] { 0, -1, (int)Direction.SOUTH });
 
 			Debug.Log("Distance Map OK");
 
@@ -733,10 +734,16 @@ public class DungeonGenerator : MonoBehaviour {
 				int[] nextPos = new int[3];
 				Direction bestDir = Direction.EAST;
 				bool[] blockDir = new bool[4];
-				
+				if (i == 8)
+				{
+					Debug.Log("Wow");
+				}
 				//init
 				for (int n = 0; n < 4; ++n)
 				{
+					if (!map[pos[0], pos[1]].isOpen((Direction)n))
+						continue;
+
 					nextPos[0] = pos[0] + ((int[])offset[n])[0]; nextPos[1] = pos[1] + ((int[])offset[n])[1]; nextPos[2] = ((int[])offset[n])[2];
 					if (nextPos[0] < 0 || nextPos[0] >= width || nextPos[1] < 0 || nextPos[1] >= height)
 						continue;
@@ -755,14 +762,8 @@ public class DungeonGenerator : MonoBehaviour {
 				pos[1] = bestPos[1];
 
 				//linking
-				int u = 0;
 				while (pos[0] != lp.out2.p.x || pos[1] != lp.out2.p.y)
 				{
-					if (u++ > 200)
-					{
-						Debug.Log("Wow that's way too much");
-						Application.Quit();
-					}
 					minWeight = int.MaxValue;
 
 					for (int n = 0; n < 4; ++n)
@@ -813,6 +814,196 @@ public class DungeonGenerator : MonoBehaviour {
 
 					blockDir[((int)bestDir + 2) % 4] = true;
 				}
+			}
+		}
+
+		public ArrayList updateInsert(bool[] dirs, int[] pos)
+		{
+			ArrayList outList = new ArrayList();
+			int[] nextPos = new int[2];
+			int[][] offset = new int[4][];
+			offset[(int)Direction.EAST] = new int[2] { 1, 0 };
+			offset[(int)Direction.NORTH] = new int[2] { 0, 1 };
+			offset[(int)Direction.WEST] = new int[2] { -1, 0 };
+			offset[(int)Direction.SOUTH] = new int[2] { 0, -1 };
+
+			for (int n = 0; n < 4; ++n)
+			{
+				if (dirs[n])
+					continue;
+				nextPos[0] = pos[0] + offset[n][0];
+				nextPos[1] = pos[1] + offset[n][1];
+
+				if (nextPos[0] < 0 || nextPos[1] < 0 || nextPos[0] >= width || nextPos[1] >= height)
+					continue;
+
+				if (map[nextPos[0], nextPos[1]] == null || !map[nextPos[0], nextPos[1]].isOpen((Direction)((n + 2) % 4)))
+					continue;
+
+				foreach (OutOfPart o in map[nextPos[0], nextPos[1]].getOuts())
+				{
+					if (o.dir == (Direction)((n + 2) % 4))
+					{
+						outList.Add(o);
+						dirs[n] = true;
+						break;
+					}
+                }
+				
+			}
+
+			map[pos[0], pos[1]] = createPart(dirs);
+			map[pos[0], pos[1]].x = pos[0];
+			map[pos[0], pos[1]].y = pos[1];
+
+			return outList;
+		}
+
+		public void generateDeadEnds(float russianRoulette)
+		{
+			ArrayList outList = new ArrayList();
+			int[][] offset = new int[4][];
+			offset[(int)Direction.EAST] = new int[2] { 1, 0 };
+			offset[(int)Direction.NORTH] = new int[2] { 0, 1 };
+			offset[(int)Direction.WEST] = new int[2] { -1, 0 };
+			offset[(int)Direction.SOUTH] = new int[2] { 0, -1 };
+
+			int[] nextPos = new int[3];
+
+			for (int x = 0; x < width; ++x)
+			{
+				for (int y = 0; y < height; ++y)
+				{
+					if (map[x, y] != null)
+					{
+						foreach (OutOfPart o in map[x, y].getOuts())
+						{
+							if (!o.p.isOpen(o.dir))
+								continue;
+
+							nextPos[0] = x + (offset[(int)o.dir])[0]; nextPos[1] = y + (offset[(int)o.dir])[1];
+							if (nextPos[0] < 0 || nextPos[0] >= width || nextPos[1] < 0 || nextPos[1] >= height)
+								continue;
+
+							if (map[nextPos[0], nextPos[1]] == null)
+							{
+								outList.Add(o);
+							}
+						}
+					}
+				}
+			}
+
+			int[] pos = new int[3];
+			ArrayList validPos = new ArrayList();
+
+			while (outList.Count != 0)
+			{
+				OutOfPart o = (OutOfPart)outList[0];
+				outList.RemoveAt(0);
+
+                pos[0] = o.p.x + (offset[(int)o.dir])[0]; pos[1] = o.p.y + (offset[(int)o.dir])[1];
+				validPos.RemoveRange(0, validPos.Count);
+
+				for (int n = 0; n < 4; ++n)
+				{
+					nextPos[0] = pos[0] + (offset[n])[0]; nextPos[1] = pos[1] + (offset[n])[1]; nextPos[2] = n;
+					if (nextPos[0] < 0 || nextPos[0] >= width || nextPos[1] < 0 || nextPos[1] >= height)
+						continue;
+
+					if (map[nextPos[0], nextPos[1]] == null)
+					{
+						validPos.Add(new int[3] { nextPos[0], nextPos[1], nextPos[2] });
+					}
+				}
+
+				bool[] blockDirs = new bool[4];
+				Direction prevDir = o.dir;
+                float random = 0.0f;
+
+				if (validPos.Count != 0)
+				{
+					nextPos = (int[])validPos[UnityEngine.Random.Range(0, validPos.Count)];
+
+					blockDirs[nextPos[2]] = blockDirs[((int)o.dir + 2) % 4] = true;
+					foreach (OutOfPart outP in updateInsert(blockDirs, pos)) outList.Remove(outP);
+					pos[0] = nextPos[0];
+					pos[1] = nextPos[1];
+					Direction dir = (Direction)nextPos[2];
+
+					do
+					{
+						for (int i = 0; i < 4; ++i) blockDirs[i] = false;
+
+						nextPos[0] = pos[0] + (offset[(int)dir])[0]; nextPos[1] = pos[1] + (offset[(int)dir])[1];
+
+						if (nextPos[0] >= 0 && nextPos[0] < width && nextPos[1] >= 0 && nextPos[1] < height && map[nextPos[0], nextPos[1]] == null)
+						{
+							blockDirs[(int)dir] = blockDirs[((int)dir + 2) % 4] = true;
+							foreach (OutOfPart outP in updateInsert(blockDirs, pos)) outList.Remove(outP);
+							pos[0] = nextPos[0];
+							pos[1] = nextPos[1];
+							prevDir = dir;
+						}
+						else
+						{
+							int sign = Math.Sign(UnityEngine.Random.value - 0.5);
+							nextPos[0] = pos[0] + (offset[((int)dir + sign * 1 + 4) % 4])[0]; nextPos[1] = pos[1] + (offset[((int)dir + sign * 1 + 4) % 4])[1];
+
+							if (nextPos[0] >= 0 && nextPos[0] < width && nextPos[1] >= 0 && nextPos[1] < height && map[nextPos[0], nextPos[1]] == null)
+							{
+								blockDirs[((int)dir + 2) % 4] = true;
+
+								prevDir = dir;
+								dir = (Direction)(((int)dir + sign * 1 + 4) % 4);
+								blockDirs[(int)dir] = true;
+
+								foreach (OutOfPart outP in updateInsert(blockDirs, pos)) outList.Remove(outP);
+								pos[0] = nextPos[0];
+								pos[1] = nextPos[1];
+							}
+							else
+							{
+								sign = -sign;
+								nextPos[0] = pos[0] + (offset[((int)dir + sign * 1 + 4) % 4])[0]; nextPos[1] = pos[1] + (offset[((int)dir + sign * 1 + 4) % 4])[1];
+
+								if (nextPos[0] >= 0 && nextPos[0] < width && nextPos[1] >= 0 && nextPos[1] < height && map[nextPos[0], nextPos[1]] == null)
+								{
+									blockDirs[((int)dir + 2) % 4] = true;
+
+									prevDir = dir;
+									dir = (Direction)(((int)dir + sign * 1 + 4) % 4);
+									blockDirs[(int)dir] = true;
+
+									foreach (OutOfPart outP in updateInsert(blockDirs, pos)) outList.Remove(outP);
+									pos[0] = nextPos[0];
+									pos[1] = nextPos[1];
+								}
+								else
+								{
+									//Current pos is a true dead end
+									prevDir = dir;
+									break;
+								}
+							}
+						}
+
+						random = UnityEngine.Random.value;
+                    } while (random < russianRoulette);
+
+					if (random > russianRoulette)
+					{
+						prevDir = dir;
+					}
+				}
+
+				for (int i = 0; i < 4; ++i)
+				{
+					blockDirs[i] = false;
+				}
+
+				blockDirs[((int)prevDir + 2) % 4] = true;
+				foreach (OutOfPart outP in updateInsert(blockDirs, pos)) outList.Remove(outP);
 			}
 		}
 
@@ -924,7 +1115,7 @@ public class DungeonGenerator : MonoBehaviour {
 	{
 		//UnityEngine.Random.seed = -125334320;
 		Debug.Log("Seed: " + UnityEngine.Random.seed);
-		DungeonMap m = new DungeonMap(5, 5, this);
+		DungeonMap m = new DungeonMap(15, 15, 0.5f, this);
 		m.display();
 		
 	}
