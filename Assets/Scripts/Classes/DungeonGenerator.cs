@@ -27,6 +27,9 @@ public class DungeonGenerator : MonoBehaviour {
 	public GameObject twoWayCurveGO;
 	public GameObject threeWayGO;
 	public GameObject fourWayGO;
+	DungeonMap m;
+	public int sizeX, sizeY;
+	public float RR, low, high;
 
 	public enum PartType
 	{
@@ -36,6 +39,13 @@ public class DungeonGenerator : MonoBehaviour {
 		THREEWAY,   // ↕>
 		FOURWAY		// +
 	}
+
+	public static float[] weightedRepartitionOfPart =
+		{   0,
+			2,
+			2,
+			2,
+			1   };
 
 	public enum Direction
 	{
@@ -352,18 +362,19 @@ public class DungeonGenerator : MonoBehaviour {
 	public class DungeonMap
 	{
 		private Part[,] map;
+		private ArrayList goList = new ArrayList();
 		private DungeonGenerator dg;
 		public int width { get; set; }
 		public int height { get; set; }
 
-		public DungeonMap(int width, int height, float russianRoulette, DungeonGenerator dg)
+		public DungeonMap(int width, int height, float russianRoulette, DungeonGenerator dg, float limitSubsetLow = 0.1f, float limitSubsetHigh = 0.2f)
 		{
 			this.dg = dg;
 			this.height = height;
 			this.width = width;
 			map = new Part[width, height];
 
-			Part[] parts = getSubset();
+			Part[] parts = getSubset(limitSubsetLow, limitSubsetHigh);
 			int x, y;
 
 			//Randomly placing the subset of parts
@@ -548,17 +559,25 @@ public class DungeonGenerator : MonoBehaviour {
 
 		public Part getRandomPart()
 		{
-			PartType type = (PartType)UnityEngine.Random.Range(1, 5);
+			float total = 0;
+			for (int i = 0; i < weightedRepartitionOfPart.Length; ++i) total += weightedRepartitionOfPart[i];
 
-			if (type == PartType.TWOWAY)
+			float random = UnityEngine.Random.value;
+			float sum = 0.0f;
+
+            if (random < (sum += weightedRepartitionOfPart[(int)PartType.ONEWAY]) / total)
+			{
+				return new OneWayPart((Direction)UnityEngine.Random.Range(0, 4));
+			}
+			if (random < (sum += weightedRepartitionOfPart[(int)PartType.TWOWAY]) / total)
 			{
 				return new TwoWayPart((Direction)UnityEngine.Random.Range(0, 4));
 			}
-			else if (type == PartType.TWOWAYCURVE)
+			else if (random < (sum += weightedRepartitionOfPart[(int)PartType.TWOWAYCURVE]) / total)
 			{
 				return new TwoWayCurvePart((Direction)UnityEngine.Random.Range(0, 4));
 			}
-			else if (type == PartType.THREEWAY)
+			else if (random < (sum += weightedRepartitionOfPart[(int)PartType.THREEWAY]) / total)
 			{
 				return new ThreeWayPart((Direction)UnityEngine.Random.Range(0, 4));
 			}
@@ -568,11 +587,13 @@ public class DungeonGenerator : MonoBehaviour {
 			}
 		}
 
-		public Part[] getSubset()
+		public Part[] getSubset(float lowLimit, float highLimit)
 		{
 			int nbCells = (height - 1) * (width - 1);
-			int min = (int)Math.Sqrt(nbCells), max = (int)Math.Sqrt(nbCells) + 1;//nbCells / 2;
-            Part[] parts = new Part[UnityEngine.Random.Range(min, max)];
+			int min = (int)Math.Ceiling(nbCells * lowLimit), max = (int)Math.Round(nbCells * highLimit);//nbCells / 2;
+			int random = UnityEngine.Random.Range(min, max);
+			Debug.Log("Dungeon loaded via " + random + " parts.");
+            Part[] parts = new Part[random];
 
 			for (int i = 0; i < parts.Length; ++i)
 			{
@@ -1073,29 +1094,37 @@ public class DungeonGenerator : MonoBehaviour {
 
 			if (p.type == PartType.ONEWAY)
 			{
-				Instantiate(dg.oneWayGO,
+				goList.Add(Instantiate(dg.oneWayGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-                            Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
+                            Quaternion.Euler(0, -(int)p.getDirection() * 90, 0)));
 			} else if (p.type == PartType.TWOWAY)
 			{
-				Instantiate(dg.twoWayGO,
+				goList.Add(Instantiate(dg.twoWayGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
+							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0)));
 			} else if (p.type == PartType.THREEWAY)
 			{
-				Instantiate(dg.threeWayGO,
+				goList.Add(Instantiate(dg.threeWayGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
+							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0)));
 			} else if (p.type == PartType.TWOWAYCURVE)
 			{
-				Instantiate(dg.twoWayCurveGO,
+				goList.Add(Instantiate(dg.twoWayCurveGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
+							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0)));
 			} else
 			{
-				Instantiate(dg.fourWayGO,
+				goList.Add(Instantiate(dg.fourWayGO,
 							new Vector3(p.x * WIDTHPART, 0, p.y * WIDTHPART),
-							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0));
+							Quaternion.Euler(0, -(int)p.getDirection() * 90, 0)));
+			}
+		}
+
+		public void clearGO()
+		{
+			foreach (GameObject o in goList)
+			{
+				Destroy(o);
 			}
 		}
 
@@ -1113,11 +1142,19 @@ public class DungeonGenerator : MonoBehaviour {
 
 	void Start()
 	{
-		//UnityEngine.Random.seed = -125334320;
-		Debug.Log("Seed: " + UnityEngine.Random.seed);
-		DungeonMap m = new DungeonMap(15, 15, 0.5f, this);
-		m.display();
-		
+		UnityEngine.Random.seed = 1696290076;
+	}
+
+	void Update()
+	{
+		if (Input.GetButton("Fire1"))
+		{
+			UnityEngine.Random.seed++;
+            Debug.Log("Seed: " + UnityEngine.Random.seed);
+			if (m != null) m.clearGO();
+			m = new DungeonMap(sizeX, sizeY, RR, this, low, high);
+			m.display();
+		}
 	}
 
 	public void generate(Vector2 size)
