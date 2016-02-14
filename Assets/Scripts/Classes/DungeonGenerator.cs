@@ -75,6 +75,23 @@ public class DungeonGenerator : MonoBehaviour {
 			}
 		}
 
+		public int[] getOffset()
+		{
+			if (dir == Direction.EAST)
+			{
+				return new int[2] { 1, 0 };
+			}
+			else if (dir == Direction.NORTH)
+			{
+				return new int[2] { 0, 1 };
+			}
+			else if (dir == Direction.WEST)
+			{
+				return new int[2] { -1, 0 };
+			}
+			return new int[2] { 0, -1 };
+		}
+
 		public Vector2 getPosition()
 		{
 			return pos;
@@ -260,7 +277,12 @@ public class DungeonGenerator : MonoBehaviour {
 		{
 			type = PartType.TWOWAYCURVE;
 			dir[(int)d] = dir[((int)d + 1) % 4] = true;
-			dir[((int)d + 2) % 4] = dir[((int)d + 3) % 4] = false;
+		}
+
+		public TwoWayCurvePart(Direction d1, Direction d2)
+		{
+			type = PartType.TWOWAYCURVE;
+			dir[(int)d1] = dir[(int)d2] = true;
 		}
 
 		public override Direction getDirection()
@@ -446,6 +468,8 @@ public class DungeonGenerator : MonoBehaviour {
 					}
 				}
 			}
+
+			makeLinks(links);
 		}
 
 		public ArrayList getOtherParts(Part[] partsCopy, Part p)
@@ -615,6 +639,238 @@ public class DungeonGenerator : MonoBehaviour {
 			return true;
 		}
 
+		public int[,] getDistanceMap(OutOfPart o)
+		{
+			int[,] distMap = new int[width, height];
+			for (int i = 0; i < width; ++i)
+				for (int j = 0; j < height; ++j)
+					distMap[i, j] = int.MaxValue;
+			ArrayList posList = new ArrayList();
+			int[] offset = o.getOffset();
+			posList.Add(new int[3] { o.p.x + offset[0], o.p.y + offset[1], 1 });
+
+			distMap[o.p.x, o.p.y] = 0;
+			int[] p;
+			while (posList.Count != 0)
+			{
+				p = (int[])posList[0];
+				posList.RemoveAt(0);
+
+				if (p[2] < distMap[p[0], p[1]])
+				{
+					distMap[p[0], p[1]] = p[2];
+				}
+				else
+				{
+					continue;
+				}
+
+				int[] current = new int[2] { p[0], p[1] };
+				++p[0];
+				if (p[0] < width && (map[current[0], current[1]] == null || map[current[0], current[1]].isOpen(Direction.EAST)))
+				{
+					if (map[p[0], p[1]] == null || map[p[0], p[1]].isOpen(Direction.WEST))
+					{
+						posList.Add(new int[3] { p[0], p[1], p[2] + 1 });
+					}
+				}
+				--p[0]; ++p[1];
+				if (p[1] < height && (map[current[0], current[1]] == null || map[current[0], current[1]].isOpen(Direction.SOUTH)))
+				{
+					if (map[p[0], p[1]] == null || map[p[0], p[1]].isOpen(Direction.NORTH))
+					{
+						posList.Add(new int[3] { p[0], p[1], p[2] + 1 });
+					}
+				}
+				--p[0]; --p[1];
+				if (p[0] >= 0 && (map[current[0], current[1]] == null || map[current[0], current[1]].isOpen(Direction.WEST)))
+				{
+					if (map[p[0], p[1]] == null || map[p[0], p[1]].isOpen(Direction.EAST))
+					{
+						posList.Add(new int[3] { p[0], p[1], p[2] + 1 });
+					}
+				}
+				++p[0]; --p[1];
+				if (p[1] >= 0 && (map[current[0], current[1]] == null || map[current[0], current[1]].isOpen(Direction.NORTH)))
+				{
+					if (map[p[0], p[1]] == null || map[p[0], p[1]].isOpen(Direction.SOUTH))
+					{
+						posList.Add(new int[3] { p[0], p[1], p[2] + 1 });
+					}
+				}
+			}
+
+			return distMap;
+		}
+
+		public void makeLinks(ArrayList links)
+		{
+			LinkOfParts lp;
+			ArrayList distMaps = new ArrayList();
+			int[,] distMap;
+
+			for (int i = 0; i < links.Count; ++i)
+			{
+				lp = (LinkOfParts)links[i];
+				distMaps.Add(getDistanceMap(lp.out2));
+			}
+
+			ArrayList offset = new ArrayList();
+			offset.Add(new int[3] { 0, 1, (int)Direction.NORTH });
+			offset.Add(new int[3] { 0, -1, (int)Direction.SOUTH });
+			offset.Add(new int[3] { 1, 0, (int)Direction.EAST });
+			offset.Add(new int[3] { -1, 0, (int)Direction.WEST });
+
+			Debug.Log("Distance Map OK");
+
+			for (int i = 0; i < links.Count; ++i)
+			{
+				lp = (LinkOfParts)links[i];
+				distMap = (int[,])distMaps[i];
+				int[] pos = new int[2] { lp.out1.p.x, lp.out1.p.y };
+				int minWeight = int.MaxValue;
+				int[] bestPos = new int[2];
+				int[] nextPos = new int[3];
+				Direction bestDir = Direction.EAST;
+				bool[] blockDir = new bool[4];
+				
+				//init
+				for (int n = 0; n < 4; ++n)
+				{
+					nextPos[0] = pos[0] + ((int[])offset[n])[0]; nextPos[1] = pos[1] + ((int[])offset[n])[1]; nextPos[2] = ((int[])offset[n])[2];
+					if (nextPos[0] < 0 || nextPos[0] >= width || nextPos[1] < 0 || nextPos[1] >= height)
+						continue;
+
+					if (distMap[nextPos[0], nextPos[1]] < minWeight && distMap[pos[0], pos[1]] - distMap[nextPos[0], nextPos[1]] == 1)
+					{
+						bestDir = (Direction)nextPos[2];
+						bestPos[0] = nextPos[0];
+						bestPos[1] = nextPos[1];
+						minWeight = distMap[nextPos[0], nextPos[1]];
+					}
+				}
+
+				blockDir[((int)bestDir + 2) % 4] = true;
+				pos[0] = bestPos[0];
+				pos[1] = bestPos[1];
+
+				//linking
+				int u = 0;
+				while (pos[0] != lp.out2.p.x || pos[1] != lp.out2.p.y)
+				{
+					if (u++ > 200)
+					{
+						Debug.Log("Wow that's way too much");
+						Application.Quit();
+					}
+					minWeight = int.MaxValue;
+
+					for (int n = 0; n < 4; ++n)
+					{
+						nextPos[0] = pos[0] + ((int[])offset[n])[0]; nextPos[1] = pos[1] + ((int[])offset[n])[1]; nextPos[2] = ((int[])offset[n])[2];
+						if (nextPos[0] < 0 || nextPos[0] >= width || nextPos[1] < 0 || nextPos[1] >= height)
+							continue;
+
+						if (distMap[nextPos[0], nextPos[1]]  < minWeight && distMap[pos[0], pos[1]] - distMap[nextPos[0], nextPos[1]] == 1)
+						{
+							bestDir = (Direction)nextPos[2];
+							bestPos[0] = nextPos[0];
+							bestPos[1] = nextPos[1];
+							minWeight = distMap[nextPos[0], nextPos[1]];
+                        }
+
+						if (map[nextPos[0], nextPos[1]] != null)
+						{
+							if (map[nextPos[0], nextPos[1]].isOpen( (Direction)((nextPos[2] + 2) %  4)) )
+							{
+								blockDir[nextPos[2]] = true;
+							}
+						}
+					}
+
+					blockDir[(int)bestDir] = true;
+
+					if (map[pos[0], pos[1]] != null)
+					{
+						replacePart(pos, blockDir);
+					}
+					else
+					{
+						Part p = createPart(blockDir);
+						map[pos[0], pos[1]] = p;
+						map[pos[0], pos[1]].x = pos[0];
+						map[pos[0], pos[1]].y = pos[1];
+					}
+
+					//Reset + Prep for nextBlock
+					pos[0] = bestPos[0];
+					pos[1] = bestPos[1];
+
+					for (int n = 0; n < 4; ++n)
+					{
+						blockDir[n] = false;
+					}
+
+					blockDir[((int)bestDir + 2) % 4] = true;
+				}
+			}
+		}
+
+		public void replacePart(int[] pos, bool[] dirs)
+		{
+			for (int i = 0; i < 4; ++i)
+			{
+				if (map[pos[0], pos[1]].isOpen((Direction)i))
+				{
+					dirs[i] = true;
+				}
+			}
+
+			map[pos[0], pos[1]] = createPart(dirs);
+			map[pos[0], pos[1]].x = pos[0];
+			map[pos[0], pos[1]].y = pos[1];
+		}
+
+		public Part createPart(bool[] dirs)
+		{
+			int nbOpen = 0;
+			ArrayList openDirs = new ArrayList();
+			ArrayList closeDirs = new ArrayList();
+
+			for (int i = 0; i < 4; ++i)
+			{
+				if (dirs[i])
+				{
+					++nbOpen;
+					openDirs.Add(i);
+				}
+				else
+				{
+					closeDirs.Add(i);
+				}
+					
+			}
+
+			switch (nbOpen)
+			{
+				case 1:
+					return new OneWayPart((Direction)openDirs[0]);
+				case 2:
+					if (dirs[0] == dirs[2])
+					{
+						return new TwoWayPart((Direction)openDirs[0]);
+					}
+					else
+					{
+						return new TwoWayCurvePart((Direction)openDirs[0], (Direction)openDirs[1]);
+					}
+				case 3:
+					return new ThreeWayPart((Direction)closeDirs[0]);
+				default:
+					return new FourWayPart();
+			}
+		}
+
 		public void instantiatePart(Part p)
 		{
 			if (p == null)
@@ -666,6 +922,8 @@ public class DungeonGenerator : MonoBehaviour {
 
 	void Start()
 	{
+		//UnityEngine.Random.seed = -125334320;
+		Debug.Log("Seed: " + UnityEngine.Random.seed);
 		DungeonMap m = new DungeonMap(5, 5, this);
 		m.display();
 		
